@@ -26,6 +26,167 @@
 '*/
 #end
 
+Class ByteArray
+    Field capacity:Int = 10
+    Field arr:Int[]
+    Field arrLength:Int = 0
+    Field byteLength:Int = 0
+    
+    Method New()
+        arr = New Int[capacity]
+    End
+    
+    Method New(copy:ByteArray)
+        Self.capacity = copy.capacity
+        Self.arr = copy.arr[..]
+        Self.arrLength = copy.arrLength    
+        Self.byteLength = copy.byteLength    
+    End
+    
+    Method New(s:String)
+        capacity = s.Length/2+1
+        arr = New Int[capacity]
+        
+        For Local i:Int = 0 Until s.Length
+            Append((s[i]&$0000FF00) Shr 8)
+            Append(s[i]&$FF)
+        End
+    End
+    
+    Method New(val:Int)
+        arr = New Int[capacity]
+        Append(val)    
+    End
+    
+    Method Length:Int() Property
+        Return byteLength    
+    End
+    
+    Method Append:Void( arr:ByteArray )
+        For Local i:Int = 0 Until arr.Length
+            Append(arr.GetByte(i))
+        End     
+    End
+    
+    Method Append:Void(val:Int)
+        If arrLength = capacity
+            capacity *= 2
+            arr = arr.Resize(capacity)
+        End
+        Local shift:Int = (3 - (byteLength Mod 4)) * 8
+        arr[arrLength] = arr[arrLength]|((val&$FF) Shl shift)
+        byteLength += 1
+        If byteLength Mod 4 = 0
+            arrLength += 1
+        End
+    End   
+    
+    Method Add:ByteArray(val:Int)
+        Local copy:ByteArray = New ByteArray(Self)
+        copy.Append(val)
+        Return copy
+    End
+    
+    Method CompareTo:Int( other:ByteArray )
+        If other.byteLength <> Self.byteLength
+            Return Self.byteLength - other.byteLength
+        End
+        Local len:Int = arrLength
+        If byteLength Mod 4 > 0
+            len += 1
+        End
+        Local ind:Int = len-1
+        
+        While ind >= 0
+            Local si:Int = Self.arr[ind]
+            Local oi:Int = other.arr[ind]
+            If oi <> si
+                Return si - oi
+            End
+            ind -= 1
+        End
+        Return 0
+    End
+    
+    Method PrintInts:Void()
+        Local s:String
+        For Local i:Int = 0 Until Length Step 2
+            s += String((GetByte(i) Shl 8)|GetByte(i+1)) + ","
+        End
+        
+        Print s
+    End
+    
+    Method PrintBytes:Void()
+        Local s:String = "["
+        For Local i:Int = 0 Until Length
+            s += GetByte(i) + ","
+        End
+        s += "]"
+        Print s
+    End
+    
+    Method GetByte:Int( index:Int )
+        Local shift:Int = (3 - index Mod 4) Shl 3
+        Return (arr[index Shr 2] & ($FF Shl shift)) Shr shift
+    End
+    
+    Method ToString:String()
+        Local strArr:String[]
+        If byteLength Mod 4 > 0 
+            strArr = New String[arrLength*2+((byteLength Mod 4)/2)]
+        Else
+            strArr = New String[arrLength*2]
+        End
+        For Local i:Int = 0 Until arrLength
+            strArr[i*2] = String.FromChar((arr[i]&$FFFF0000) Shr 16)
+            strArr[i*2+1] = String.FromChar(arr[i]&$0000FFFF)            
+        End
+        Local remBytes:Int = byteLength - arrLength*4
+        If remBytes > 0
+            strArr[arrLength*2] = String.FromChar((arr[arrLength]&$FFFF0000) Shr 16)
+            If remBytes > 2
+                strArr[arrLength*2+1] = String.FromChar(arr[arrLength]&$0000FFFF)
+            End
+        End
+        Return "".Join(strArr)
+    End
+    
+    Method ObjectEnumerator:ByteArrayObjectEnumerator()
+        Return New ByteArrayObjectEnumerator(arr,byteLength)
+    End
+End
+
+Class ByteArrayObjectEnumerator
+	Field arr:Int[]
+    Field byteLength:Int
+    Field currByte:Int = 0
+    
+    Method New( arr:Int[], byteLength:Int)
+		Self.arr = arr
+        Self.byteLength = byteLength
+	End
+
+	Method HasNext()
+		Return currByte < byteLength
+	End
+	
+	Method NextObject:IntObject()
+        Local ind:Int = currByte/4
+        Local shift:Int = (3 - currByte Mod 4) * 8
+        currByte += 1
+		Return New IntObject(((arr[ind] & $FF) Shl shift) Shr shift)
+	End
+End
+
+Class ByteArrayMap<V> Extends Map<ByteArray,V>
+
+	Method Compare( lhs:ByteArray,rhs:ByteArray )
+		Return lhs.CompareTo(rhs)
+	End
+
+End
+
 #rem
 ' summary:This class provides string compression and decompression functions based on the LZW
 ' algorithm. It is based on implementations found at http://rosettacode.org/wiki/LZW_compression
@@ -34,8 +195,8 @@ Class LZW
     
     Private
     
-    Global compressDict:StringMap<IntObject> = New StringMap<IntObject>()
-    Global uncompressDict:String[] = []
+    Global compressDict:ByteArrayMap<IntObject> = New ByteArrayMap<IntObject>()
+    Global uncompressDict:ByteArray[] = []
     
     Public
     
@@ -43,38 +204,53 @@ Class LZW
     summary: Takes an input string and returns the LZW compressed version
 #end
     Function CompressString:String(input:String)
-        Local dictSize:Int = 256
+        Local dictSize:Int = 256 + avoidZero
         compressDict.Clear()
         
+        For Local i:Int = avoidZero Until dictSize
+            Local ba:ByteArray = New ByteArray()
+            ba.Append(i-avoidZero)
+            compressDict.Set(ba, i)
+        End
+        'Add 0 combinations
         For Local i:Int = 0 Until dictSize
-            compressDict.Set(String.FromChar(i), i)
+            Local ba:ByteArray = New ByteArray()
+            ba.Append(i)
+            ba.Append(0)
+            compressDict.Set(ba, dictSize+i)
+            ba = New ByteArray()
+            ba.Append(0)
+            ba.Append(i)
+            compressDict.Set(ba, dictSize+256+i)
         End
         
-        Local w:String = ""
+        dictSize += 512
         
-        'storing sections in an array and then using join is slightly slower on some targets
-        'but hugely faster on android
-        Local sa:String[] = New String[input.Length+1]
+        Local w:ByteArray = New ByteArray()
+        Local ia:ByteArray = New ByteArray(input)
+        Local result:String[] = New String[ia.Length+1]
         
-        For Local i:Int = 0 Until input.Length() 
-            Local cs:String = String.FromChar(input[i])
-            Local wc:String = w + cs
+        For Local i:Int = 0 Until ia.Length
+            Local byte:Int = ia.GetByte(i)
+            Local wc:ByteArray = w.Add(byte)
+        
             If (compressDict.Contains(wc))
                 w = wc
             Else
-                sa[i] = String.FromChar(compressDict.Get(w))
+                Local code:Int = compressDict.Get(w)
+                result[i] = String.FromChar(code)
                 ' Add wc to the dictionary.
                 compressDict.Set(wc, dictSize)
                 dictSize += 1
-                w = cs
+                w = New ByteArray(byte)
             End
         End
         ' Output the code for w.
         If w.Length() > 0
-            sa[input.Length] = String.FromChar(compressDict.Get(w))
+            result[ia.Length] = String.FromChar(compressDict.Get(w))
         End
         
-        Return "".Join(sa)
+        Return "".Join(result)
         
     End
     
@@ -82,45 +258,65 @@ Class LZW
     summary: Takes a string compressed with CompressString and returns the uncompressed version.
     Set discardDict to True to recover the memory used for the decompression dictionary
 #end
+    Const avoidZero:Int = 1
     Function DecompressString:String(compressed:String, discardDict:Bool = False)
-        Local dictSize:Int = 256
-        
+    
+        Local dictSize:Int = 256 + avoidZero
+                
         'Trading memory for performance here by using an array rather than a map
         If uncompressDict.Length = 0
-            uncompressDict = New String[65536]
-            For Local i:Int = 0 Until dictSize
-                uncompressDict[i] = String.FromChar(i)
+            uncompressDict = New ByteArray[65536]
+            For Local i:Int = avoidZero Until dictSize
+                uncompressDict[i] = New ByteArray(i-avoidZero)
             End 
+            'Add 0 combinations
+            For Local i:Int = 0 Until dictSize
+                Local ba:ByteArray = New ByteArray()
+                ba.Append(i)
+                ba.Append(0)
+                uncompressDict[dictSize+i] = ba
+                
+                ba = New ByteArray()
+                ba.Append(0)
+                ba.Append(i)
+                uncompressDict[dictSize+256+i] = ba
+            End
+        
         End
         
-        Local dictionary:String[] = uncompressDict[..]
+        dictSize += 512
         
-        Local w:String = "" + String.FromChar(compressed[0])
-        Local sa:String[] = New String[compressed.Length]
-        sa[0] = w
+        Local dictionary:ByteArray[] = uncompressDict[..]
+        Local w:ByteArray = New ByteArray()
+        Local sa:ByteArray = New ByteArray()
         
-        For Local i:Int = 1 Until compressed.Length
+        Local i:Int = 0
+        While i < compressed.Length
             Local k:Int = compressed[i]
-            Local entry:String
-            If dictionary[k]
+            Local entry:ByteArray
+            
+            If dictionary[k] And dictionary[k].Length > 0
                 entry = dictionary[k]
             ElseIf k = dictSize
-                entry = w + String.FromChar(w[0])
+                entry = w.Add(w.GetByte(0))
             Else
                 Error "LZW - unknown dictionary key: " + k
             End
-            sa[i] = entry
+            sa.Append( entry )
             
-            'Add w+entry[0] to the dictionary.
-            dictionary[dictSize] = w + String.FromChar(entry[0])
-            dictSize += 1
- 
+            If w.Length > 0
+                'Add w+entry[0] to the dictionary.
+                dictionary[dictSize] = w.Add(entry.GetByte(0))
+                dictSize += 1
+            End
             w = entry
+            i += 1
         End
+        
         If discardDict
             uncompressDict = []
         End
-        Return "".Join(sa)
+        Return sa.ToString()
     End
  End
  
