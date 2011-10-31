@@ -38,9 +38,17 @@ Class ByteArray
     
     Method New(copy:ByteArray)
         Self.capacity = copy.capacity
-        Self.arr = copy.arr[..]
-        Self.arrLength = copy.arrLength    
-        Self.byteLength = copy.byteLength    
+        Self.arr = New Int[capacity]
+        'This is actually faster than using the array slice copy
+        'presumably because that uses reflection
+        For Local i:Int = 0 Until copy.arrLength
+            arr[i] = copy.arr[i]
+        End
+        arrLength = copy.arrLength
+        byteLength = copy.byteLength
+        If byteLength Mod 4 > 0
+            arr[arrLength] = copy.arr[arrLength]
+        End
     End
     
     Method New(s:String)
