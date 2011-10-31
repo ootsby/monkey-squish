@@ -48,7 +48,7 @@ Class ByteArray
         arr = New Int[capacity]
         
         For Local i:Int = 0 Until s.Length
-            Append((s[i]&$0000FF00) Shr 8)
+            Append(((s[i]&$0000FF00) Shr 8)&$FF)
             Append(s[i]&$FF)
         End
     End
@@ -91,20 +91,22 @@ Class ByteArray
         If other.byteLength <> Self.byteLength
             Return Self.byteLength - other.byteLength
         End
+        
         Local len:Int = arrLength
         If byteLength Mod 4 > 0
             len += 1
         End
-        Local ind:Int = len-1
+        Local ind:Int = 0
         
-        While ind >= 0
-            Local si:Int = Self.arr[ind]
-            Local oi:Int = other.arr[ind]
+        While ind < byteLength
+            Local si:Int = Self.GetByte(ind)
+            Local oi:Int = other.GetByte(ind)
             If oi <> si
                 Return si - oi
             End
-            ind -= 1
+            ind += 1
         End
+        
         Return 0
     End
     
@@ -128,13 +130,18 @@ Class ByteArray
     
     Method GetByte:Int( index:Int )
         Local shift:Int = (3 - index Mod 4) Shl 3
-        Return (arr[index Shr 2] & ($FF Shl shift)) Shr shift
+        Local ret:Int = ((arr[index Shr 2] & ($FF Shl shift)) Shr shift)&$FF
+        Return ret
     End
     
     Method ToString:String()
         Local strArr:String[]
         If byteLength Mod 4 > 0 
-            strArr = New String[arrLength*2+((byteLength Mod 4)/2)]
+            If byteLength Mod 4 > 2 
+                strArr = New String[arrLength*2+2]
+            Else  
+                strArr = New String[arrLength*2+1]
+            End
         Else
             strArr = New String[arrLength*2]
         End
@@ -144,7 +151,7 @@ Class ByteArray
         End
         Local remBytes:Int = byteLength - arrLength*4
         If remBytes > 0
-            strArr[arrLength*2] = String.FromChar((arr[arrLength]&$FFFF0000) Shr 16)
+            strArr[arrLength*2] = String.FromChar(((arr[arrLength]&$FFFF0000) Shr 16) & $FFFF)
             If remBytes > 2
                 strArr[arrLength*2+1] = String.FromChar(arr[arrLength]&$0000FFFF)
             End
@@ -233,7 +240,7 @@ Class LZW
         For Local i:Int = 0 Until ia.Length
             Local byte:Int = ia.GetByte(i)
             Local wc:ByteArray = w.Add(byte)
-        
+                   
             If (compressDict.Contains(wc))
                 w = wc
             Else
