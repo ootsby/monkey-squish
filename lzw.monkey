@@ -142,6 +142,51 @@ Class ByteArray
         Return ret
     End
     
+    Method ToYEnc:String()
+        Local out:String[] = New String[byteLength*2] 'Overkill
+        Local sIndex:Int = 0
+        
+        For Local i:Int = 0 Until byteLength
+            Local bVal:Int = GetByte(i)
+            Local outVal = (bVal + 42) Mod 256
+            
+            If outVal = $00 Or outVal = $0A Or outVal = $0D Or outVal = $3D
+                out[sIndex] = "="
+                sIndex += 1
+                outVal = (bVal + 64) Mod 256
+            End
+            
+            out[sIndex] = String.FromChar(outVal) 
+            sIndex += 1
+                
+        End
+        
+        Return "".Join(out)
+    End
+    
+    Function FromYEnc:ByteArray(in:String)
+        Local ba:ByteArray = New ByteArray()
+        
+        For Local i:Int = 0 Until in.Length
+            Local bVal:Int = in[i]
+            
+            If bVal = $3D
+                i += 1
+                bVal = in[i]
+                bVal -= 64
+            Else
+                bVal -= 42
+            End
+            
+            If bVal < 0
+                bVal += 256
+            End
+            ba.Append(bVal)
+        End
+        
+        Return ba
+    End
+    
     Method ToString:String()
         Local strArr:String[]
         If byteLength Mod 4 > 0 
@@ -218,32 +263,14 @@ Class LZW
 #rem
     summary: Takes an input string and returns the LZW compressed version
 #end
-    Function CompressString:String(input:String)
-        Local dictSize:Int = 256 + avoidZero
-        compressDict.Clear()
-        
-        For Local i:Int = avoidZero Until dictSize
-            Local ba:ByteArray = New ByteArray()
-            ba.Append(i-avoidZero)
-            compressDict.Set(ba, i)
-        End
-        'Add 0 combinations
-        For Local i:Int = 0 Until dictSize
-            Local ba:ByteArray = New ByteArray()
-            ba.Append(i)
-            ba.Append(0)
-            compressDict.Set(ba, dictSize+i)
-            ba = New ByteArray()
-            ba.Append(0)
-            ba.Append(i)
-            compressDict.Set(ba, dictSize+256+i)
-        End
-        
-        dictSize += 512
+    Function CompressString:String(input:String)                
         
         Local w:ByteArray = New ByteArray()
         Local ia:ByteArray = New ByteArray(input)
         Local result:String[] = New String[ia.Length+1]
+        
+        Local compressDict:ByteArrayMap<IntObject> = ResetEncodeDict()
+        Local dictSize:Int = baseDictSize
         
         For Local i:Int = 0 Until ia.Length
             Local byte:Int = ia.GetByte(i)
@@ -257,6 +284,10 @@ Class LZW
                 ' Add wc to the dictionary.
                 compressDict.Set(wc, dictSize)
                 dictSize += 1
+                If dictSize = maxDictSize
+                    compressDict = ResetEncodeDict()
+                    dictSize = baseDictSize
+                End
                 w = New ByteArray(byte)
             End
         End
@@ -264,11 +295,71 @@ Class LZW
         If w.Length() > 0
             result[ia.Length] = String.FromChar(compressDict.Get(w))
         End
-        
         Return "".Join(result)
+        'Local ba:ByteArray = New ByteArray("".Join(result))
+        'Return ba.ToYEnc()
         
     End
     
+    Private
+    
+    Global maxDictSize:Int = $3FFF
+    Global baseDictSize:Int
+    
+    Function ResetEncodeDict:ByteArrayMap<IntObject>()
+        baseDictSize = 256 + avoidZero
+        compressDict.Clear()
+        
+        For Local i:Int = avoidZero Until baseDictSize
+            Local ba:ByteArray = New ByteArray()
+            ba.Append(i-avoidZero)
+            compressDict.Set(ba, i)
+        End
+        'Add 0 combinations
+        For Local i:Int = 0 Until baseDictSize
+            Local ba:ByteArray = New ByteArray()
+            ba.Append(i)
+            ba.Append(0)
+            compressDict.Set(ba, baseDictSize+i)
+            ba = New ByteArray()
+            ba.Append(0)
+            ba.Append(i)
+            compressDict.Set(ba, baseDictSize+256+i)
+        End
+        
+        baseDictSize += 512
+        Return compressDict
+    End
+    
+    Function ResetDecodeDict:ByteArray[]()
+        baseDictSize = 256 + avoidZero
+                
+        'Trading memory for performance here by using an array rather than a map
+        If uncompressDict.Length = 0
+            uncompressDict = New ByteArray[maxDictSize]
+            For Local i:Int = avoidZero Until baseDictSize
+                uncompressDict[i] = New ByteArray(i-avoidZero)
+            End 
+            'Add 0 combinations
+            For Local i:Int = 0 Until baseDictSize
+                Local ba:ByteArray = New ByteArray()
+                ba.Append(i)
+                ba.Append(0)
+                uncompressDict[baseDictSize+i] = ba
+                
+                ba = New ByteArray()
+                ba.Append(0)
+                ba.Append(i)
+                uncompressDict[baseDictSize+256+i] = ba
+            End
+        
+        End
+        
+        baseDictSize += 512
+        Return uncompressDict[..]
+    End
+    
+    Public
 #rem
     summary: Takes a string compressed with CompressString and returns the uncompressed version.
     Set discardDict to True to recover the memory used for the decompression dictionary
@@ -276,33 +367,12 @@ Class LZW
     Const avoidZero:Int = 1
     Function DecompressString:String(compressed:String, discardDict:Bool = False)
     
-        Local dictSize:Int = 256 + avoidZero
-                
-        'Trading memory for performance here by using an array rather than a map
-        If uncompressDict.Length = 0
-            uncompressDict = New ByteArray[65536]
-            For Local i:Int = avoidZero Until dictSize
-                uncompressDict[i] = New ByteArray(i-avoidZero)
-            End 
-            'Add 0 combinations
-            For Local i:Int = 0 Until dictSize
-                Local ba:ByteArray = New ByteArray()
-                ba.Append(i)
-                ba.Append(0)
-                uncompressDict[dictSize+i] = ba
-                
-                ba = New ByteArray()
-                ba.Append(0)
-                ba.Append(i)
-                uncompressDict[dictSize+256+i] = ba
-            End
-        
-        End
-        
-        dictSize += 512
-        
-        Local dictionary:ByteArray[] = uncompressDict[..]
+        Local dictionary:ByteArray[] = ResetDecodeDict()
+        Local dictSize:Int = baseDictSize
         Local w:ByteArray = New ByteArray()
+        'Local sa:ByteArray = ByteArray.FromYEnc(compressed)
+        'compressed = sa.ToString()
+        'sa = New ByteArray()
         Local sa:ByteArray = New ByteArray()
         
         Local i:Int = 0
@@ -315,7 +385,8 @@ Class LZW
             ElseIf k = dictSize
                 entry = w.Add(w.GetByte(0))
             Else
-                Error "LZW - unknown dictionary key: " + k
+                Print "LZW - unknown dictionary key: " + k
+                Return ""
             End
             sa.Append( entry )
             
@@ -323,6 +394,11 @@ Class LZW
                 'Add w+entry[0] to the dictionary.
                 dictionary[dictSize] = w.Add(entry.GetByte(0))
                 dictSize += 1
+                If dictSize = maxDictSize
+                    'Print "resetting dict"
+                    dictionary = ResetDecodeDict()
+                    dictSize = baseDictSize
+                End
             End
             w = entry
             i += 1
