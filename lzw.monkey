@@ -254,11 +254,20 @@ End
 Class LZW
     
     Private
-    
+    Global markerWord1:Int = "L"[0] Shl 8 + "Z"[0]
+    Global markerWord2:Int = "W"[0] Shl 8 + "S"[0]
+    Global markerString:String = String.FromChar(markerWord1) + String.FromChar(markerWord2)     
     Global compressDict:ByteArrayMap<IntObject> = New ByteArrayMap<IntObject>()
     Global uncompressDict:ByteArray[] = []
     
     Public
+    
+    Function IsLZWString:Bool( in:String )
+        If in[0] = markerWord1 And in[1] = markerWord2
+            Return True
+        End
+        Return False
+    End
     
 #rem
     summary: Takes an input string and returns the LZW compressed version
@@ -295,7 +304,7 @@ Class LZW
         If w.Length() > 0
             result[ia.Length] = String.FromChar(compressDict.Get(w))
         End
-        Return "".Join(result)
+        Return markerString + "".Join(result)
         'Local ba:ByteArray = New ByteArray("".Join(result))
         'Return ba.ToYEnc()
         
@@ -365,8 +374,19 @@ Class LZW
     Set discardDict to True to recover the memory used for the decompression dictionary
 #end
     Const avoidZero:Int = 1
-    Function DecompressString:String(compressed:String, discardDict:Bool = False)
+    Function DecompressString:String(compressed:String, discardDict:Bool = False, force:Bool = False)
     
+        Local i:Int = 0
+        
+        If Not IsLZWString(compressed)
+            If Not force
+                Print "Input string is not marked as LZW compressed, returning without decompressing."
+                Return compressed
+            End
+        Else
+            i = 2    
+        End
+        
         Local dictionary:ByteArray[] = ResetDecodeDict()
         Local dictSize:Int = baseDictSize
         Local w:ByteArray = New ByteArray()
@@ -375,7 +395,6 @@ Class LZW
         'sa = New ByteArray()
         Local sa:ByteArray = New ByteArray()
         
-        Local i:Int = 0
         While i < compressed.Length
             Local k:Int = compressed[i]
             Local entry:ByteArray
